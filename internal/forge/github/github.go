@@ -2058,12 +2058,14 @@ func (c *LiveClient) DismissPullRequestReview(ctx context.Context, owner, repo s
 
 // MergeChangeProposal squash-merges a pull request by number.
 // If the merge fails with a 409 (head branch out of date), it updates the PR
-// branch and retries up to 3 times with a short delay between attempts.
+// branch and retries up to 3 times with a 3-second delay between attempts
+// (total potential delay ~6s).
 func (c *LiveClient) MergeChangeProposal(ctx context.Context, owner, repo string, number int) error {
 	const maxAttempts = 3
 	mergePath := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
 	updatePath := fmt.Sprintf("/repos/%s/%s/pulls/%d/update-branch", owner, repo, number)
 
+	var lastErr error
 	for attempt := range maxAttempts {
 		resp, err := c.put(ctx, mergePath, map[string]string{"merge_method": "squash"})
 		if err == nil {
@@ -2075,23 +2077,31 @@ func (c *LiveClient) MergeChangeProposal(ctx context.Context, owner, repo string
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
 			return fmt.Errorf("merge pull request #%d: %w", number, err)
 		}
+		lastErr = err
+
+		// No point updating the branch on the final attempt since we won't retry.
+		if attempt >= maxAttempts-1 {
+			break
+		}
 
 		// Update the PR branch to incorporate base branch changes.
 		updateResp, updateErr := c.do(ctx, http.MethodPut, updatePath, map[string]string{})
-		if updateErr == nil {
-			updateResp.Body.Close()
+		if updateErr != nil {
+			return fmt.Errorf("merge pull request #%d: update branch: %w", number, updateErr)
 		}
+		if err := checkStatus(updateResp, http.StatusAccepted, http.StatusOK); err != nil {
+			return fmt.Errorf("merge pull request #%d: update branch: %w", number, err)
+		}
+		updateResp.Body.Close()
 
-		if attempt < maxAttempts-1 {
-			select {
-			case <-time.After(3 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		select {
+		case <-time.After(3 * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
-	return fmt.Errorf("merge pull request #%d: branch remained out of date after %d update-and-retry attempts", number, maxAttempts)
+	return fmt.Errorf("merge pull request #%d: branch remained out of date after %d attempts: %w", number, maxAttempts, lastErr)
 }
 
 // UpdatePullRequestBranch updates a PR's head branch by merging the base
