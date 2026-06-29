@@ -646,6 +646,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	// the code agent), the post-script runs unconditionally after a
 	// successful agent run — the post-script itself is responsible for
 	// any output checks it needs.
+	hostRepositoryDownloadDir := filepath.Join(os.TempDir(), sandboxName)
 	if h.PostScript != "" {
 		defer func() {
 			if noPostScript {
@@ -665,6 +666,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 			postCmd := exec.Command(h.PostScript)
 			postCmd.Dir = runDir
 			postCmd.Env = childScriptEnv(h.RunnerEnv, telemetry.TraceParent(wTraceID, rootSpanID))
+			postCmd.Env = append(postCmd.Env, fmt.Sprintf("REPO_DIR=%s", hostRepositoryDownloadDir))
 			postCmd.Stdout = os.Stdout
 			postCmd.Stderr = os.Stderr
 			if err := postCmd.Run(); err != nil {
@@ -1053,18 +1055,19 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 
 		// 9d. Extract target repo back to host. SafeDownload removes dangerous
 		// symlinks (absolute or repo-escaping) and .git/hooks/ to prevent sandbox escape.
-		if clearErr := os.RemoveAll(hostRepositoryDir); clearErr != nil {
-			return fmt.Errorf("clearing local repo %s before extraction: %w", hostRepositoryDir, clearErr)
+		if clearErr := os.RemoveAll(hostRepositoryDownloadDir); clearErr != nil {
+			return fmt.Errorf("clearing local repo %s before extraction: %w", hostRepositoryDownloadDir, clearErr)
 		}
+
 		repoExtractStart := time.Now()
 		printer.StepStart("Extracting target repo")
-		if err := sandbox.SafeDownload(sandboxName, remoteRepositoryDir, hostRepositoryDir); err != nil {
+		if err := sandbox.SafeDownload(sandboxName, remoteRepositoryDir, hostRepositoryDownloadDir); err != nil {
 			if es := tx.ParseTranscriptErrors(iterTranscriptDir); len(es) > 0 {
 				tx.EmitTranscriptErrors(os.Stderr, es)
 			}
 			return fmt.Errorf("extracting target repo (iteration %d): %w", iteration, err)
 		}
-		printer.StepDone(fmt.Sprintf("Target repo extracted to %s (%.1fs)", hostRepositoryDir, time.Since(repoExtractStart).Seconds()))
+		printer.StepDone(fmt.Sprintf("Target repo extracted to %s (%.1fs)", hostRepositoryDownloadDir, time.Since(repoExtractStart).Seconds()))
 
 		// 9e. Run validation.
 		if h.ValidationLoop == nil {
@@ -1077,7 +1080,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		valCmd.Dir = iterDir
 		valCmd.Env = append(os.Environ(),
 			append(envToList(h.RunnerEnv),
-				fmt.Sprintf("TARGET_REPO_DIR=%s", hostRepositoryDir),
+				fmt.Sprintf("TARGET_REPO_DIR=%s", hostRepositoryDownloadDir),
 				fmt.Sprintf("FULLSEND_RUN_DIR=%s", runDir),
 			)...,
 		)
@@ -1151,6 +1154,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	printer.Blank()
 	printer.Header("Results")
 	printer.KeyValue("Run directory", runDir)
+	printer.KeyValue("Download directory", hostRepositoryDownloadDir)
 	printer.KeyValue("Agent exit code", fmt.Sprintf("%d", lastExitCode))
 	printer.KeyValue("Agent runs", fmt.Sprintf("%d", runCount))
 	printer.KeyValue("Trace ID", securityTraceID)
