@@ -46,6 +46,7 @@ Infrastructure platform choice and configuration are specified in the adopting o
 - Reusable workflows: agent workflows in `.fullsend` are thin callers (~40-70 lines) that delegate infrastructure logic to upstream reusable workflows (`fullsend-ai/fullsend/.github/workflows/reusable-*.yml`) via `workflow_call`. Infrastructure patches ship once upstream and propagate to all orgs without re-install ([ADR 0031](ADRs/0031-reusable-workflows-for-action-installed-distribution.md)). **`--vendor`** ([ADR 0047](ADRs/0047-vendored-installs-with-vendor-flag.md)) commits workflows and agent content at install time; layered installs (default) fetch upstream at runtime.
 - Event-driven stage dispatch: eliminate `workflow_dispatch` + `gh workflow run` fan-out from `dispatch.yml` in favor of synchronous `workflow_call` so the dispatched run stays linked to the caller ([ADR 0041](ADRs/0041-synchronous-workflow-call-event-dispatch.md)).
 - Multi-repo management: a `fullsend repos` subcommand group with a declarative `repos.yaml` manifest for managing per-repo installations at scale — bulk install, status, sync, upgrade, and removal across repos and orgs ([ADR 0057](ADRs/0057-repos-management.md)).
+- GitLab event dispatch: two-path model — native CI triggers (`merge_request_event`) for MR events, cron-based polling for issues/comments/labels. No external infrastructure (no webhook bridge). Bot PAT via OIDC/WIF from Secret Manager. Per-repo only ([ADR 0063](ADRs/0063-gitlab-cron-polling-event-dispatch.md)).
 
 **Open questions:**
 
@@ -171,6 +172,7 @@ The existing design principle is that [the repo is the coordinator](problems/age
   evaluated by `fullsend dispatch` with pluggable input/output drivers
   operating on a `NormalizedEvent` struct
   ([ADR 0061](ADRs/0061-harness-cel-dispatch.md)).
+- GitLab dispatch uses cron-polled scheduled pipelines for issue/comment/label events and native `merge_request_event` for MR events. No webhook bridge required (see [ADR 0063](ADRs/0063-gitlab-cron-polling-event-dispatch.md)).
 
 **Open questions:**
 
