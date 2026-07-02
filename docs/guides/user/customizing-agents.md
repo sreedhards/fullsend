@@ -298,6 +298,41 @@ Each agent role has its own identity, permissions, and purpose:
 
 ## Customization Examples
 
+### Modifying the PATH
+
+To modify the agent's `PATH` so it gains access to new executables,
+use the harness' `host_files` key:
+
+```yaml
+host_files:
+  - src: scripts/my-tool.sh
+    dest: /tmp/bin/my-tool.sh
+  - src: env/path-modification.env
+    dest: /sandbox/workspace/.env.d/path-modification.env
+    expand: false  # expand works outside the runner, so we set it to false
+```
+
+The `scripts/my-tool.sh` file:
+
+```bash
+#!/bin/bash
+
+echo "Hello from $0"
+```
+
+And the `env/path-modification.env`:
+
+```bash
+PATH=/tmp/bin:$PATH
+```
+
+The agent execution sources the special file  `/sandbox/workspace/.env` which
+sources all the files under `/sandbox/workspace/.env.d/`, including your
+`path-modification.env` that includes `/tmp/bin/` into the `PATH`.
+
+**Note**: the harness' `env.sandbox` does not work to modify the `PATH` as it
+rejects numerous special variables to avoid the malfunction of the agent.
+
 ### Adding a Custom Skill
 
 Create `.fullsend/customized/skills/my-skill/SKILL.md` in your config repo:
